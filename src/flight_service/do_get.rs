@@ -37,18 +37,19 @@ pub struct RemotePlanExec {
 }
 
 impl DoGet {
-    pub fn new_remote_plan_exec(
+    pub fn new_remote_plan_exec_ticket(
         plan: Arc<dyn ExecutionPlan>,
         stage_context: StageContext,
         extension_codec: &dyn PhysicalExtensionCodec,
-    ) -> Result<Self, DataFusionError> {
+    ) -> Result<Ticket, DataFusionError> {
         let node = PhysicalPlanNode::try_from_physical_plan(plan, extension_codec)?;
-        Ok(Self {
+        let do_get = Self {
             inner: Some(DoGetInner::RemotePlanExec(RemotePlanExec {
                 plan: Some(Box::new(node)),
                 stage_context: Some(stage_context),
             })),
-        })
+        };
+        Ok(Ticket::new(do_get.encode_to_vec()))
     }
 }
 

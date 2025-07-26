@@ -18,6 +18,17 @@ pub enum DoPutInner {
     StageContext(StageContext),
 }
 
+impl DoPut {
+    pub fn new_stage_context_flight_data(stage_context: StageContext) -> FlightData {
+        let this = Self {
+            inner: Some(DoPutInner::StageContext(stage_context)),
+        };
+
+        let flight_data = FlightData::new().with_data_body(this.encode_to_vec());
+        flight_data
+    }
+}
+
 impl ArrowFlightEndpoint {
     pub(super) async fn put(
         &self,
