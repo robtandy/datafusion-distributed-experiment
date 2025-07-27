@@ -8,7 +8,8 @@ use arrow_flight::Ticket;
 use datafusion::error::DataFusionError;
 use datafusion::execution::SessionStateBuilder;
 use datafusion::optimizer::OptimizerConfig;
-use datafusion::physical_plan::{execute_stream, ExecutionPlan};
+use datafusion::physical_plan::ExecutionPlan;
+use datafusion_proto::physical_plan::from_proto::parse_protobuf_partitioning;
 use datafusion_proto::physical_plan::{AsExecutionPlan, PhysicalExtensionCodec};
 use datafusion_proto::protobuf::PhysicalPlanNode;
 use futures::TryStreamExt;
@@ -82,34 +83,64 @@ impl ArrowFlightEndpoint {
             ));
         };
 
-        let plan = match action.plan {
-            None => {
-                return Err(Status::invalid_argument(
-                    "RemotePlanExec is missing the plan",
-                ))
-            }
-            Some(plan) => plan
-                .try_into_physical_plan(
-                    function_registry,
-                    &self.runtime,
-                    // TODO: The user should be able to pass its own extension decoder.
-                    &ArrowFlightReadExecProtoCodec::new(&self.runtime),
-                )
-                .map_err(|err| Status::internal(format!("Cannot deserialize plan: {err}")))?,
+        let Some(plan_proto) = action.plan else {
+            return Err(Status::invalid_argument(
+                "RemotePlanExec is missing the plan",
+            ));
         };
 
+        let Some(stage_context) = action.stage_context else {
+            return Err(Status::invalid_argument(
+                "RemotePlanExec is missing the stage context",
+            ));
+        };
+        let plan = plan_proto
+            .try_into_physical_plan(
+                function_registry,
+                &self.runtime,
+                // TODO: The user should be able to pass its own extension decoder.
+                &ArrowFlightReadExecProtoCodec::new(&self.runtime),
+            )
+            .map_err(|err| Status::internal(format!("Cannot deserialize plan: {err}")))?;
+
+        let id = stage_context.id.clone();
+        let current = stage_context.current;
+        let partitioning = match parse_protobuf_partitioning(
+            stage_context.partitioning.as_ref(),
+            function_registry,
+            &plan.schema(),
+            // TODO: The user should be able to pass its own extension decoder.
+            &ArrowFlightReadExecProtoCodec::new(&self.runtime),
+        ) {
+            Ok(Some(partitioning)) => partitioning,
+            Ok(None) => return Err(Status::invalid_argument("Missing partitioning")),
+            Err(err) => {
+                return Err(Status::invalid_argument(format!(
+                    "Cannot parse partitioning {err}"
+                )))
+            }
+        };
         let config = state.config_mut();
         config.set_extension(Arc::clone(&self.stage_delegation));
         config.set_extension(Arc::clone(&self.channel_manager));
-        config.set_extension(Arc::new(action.stage_context));
+        config.set_extension(Arc::new(stage_context));
 
-        // TODO: multiplex the output stream.
+        let stream_partitioner = self.partitioner_registry.get_or_create_stream_partitioner(
+            id,
+            plan,
+            partitioning,
+            state.task_ctx(),
+        ).map_err(|err| {
+            Status::internal(format!("Could not create stream partitioner: {err}"))
+        })?;
+
+        let stream = stream_partitioner.stream_partition(current as usize).map_err(|err| {
+            Status::internal(format!("Cannot get stream partition: {err}"))
+        })?;
+
         // TODO: error propagation
-        let stream = execute_stream(plan, state.task_ctx())
-            .map_err(|err| Status::internal(err.to_string()))?;
-
         let flight_data_stream = FlightDataEncoderBuilder::new()
-            .with_schema(stream.schema())
+            .with_schema(stream_partitioner.schema())
             .build(stream.map_err(|err| FlightError::ExternalError(Box::new(err))));
 
         Ok(Response::new(Box::pin(flight_data_stream.map_err(|err| {

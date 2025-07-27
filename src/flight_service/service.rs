@@ -1,4 +1,5 @@
 use crate::channel_manager::ChannelManager;
+use crate::flight_service::stream_partitioner_registry::StreamPartitionerRegistry;
 use crate::stage_delegation::StageDelegation;
 use arrow_flight::flight_service_server::FlightService;
 use arrow_flight::{
@@ -15,6 +16,7 @@ pub struct ArrowFlightEndpoint {
     pub(super) channel_manager: Arc<ChannelManager>,
     pub(super) stage_delegation: Arc<StageDelegation>,
     pub(super) runtime: Arc<RuntimeEnv>,
+    pub(super) partitioner_registry: Arc<StreamPartitionerRegistry>,
 }
 
 #[async_trait]

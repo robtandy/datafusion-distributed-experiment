@@ -6,13 +6,15 @@ use arrow_flight::decode::FlightRecordBatchStream;
 use arrow_flight::error::FlightError;
 use arrow_flight::flight_service_client::FlightServiceClient;
 use datafusion::common::runtime::JoinSet;
-use datafusion::common::{exec_datafusion_err, exec_err, internal_err, plan_err};
+use datafusion::common::{exec_datafusion_err, internal_err, plan_err};
 use datafusion::error::DataFusionError;
 use datafusion::execution::{SendableRecordBatchStream, TaskContext};
 use datafusion::physical_expr::{EquivalenceProperties, Partitioning};
 use datafusion::physical_plan::execution_plan::{Boundedness, EmissionType};
 use datafusion::physical_plan::stream::RecordBatchStreamAdapter;
 use datafusion::physical_plan::{DisplayAs, DisplayFormatType, ExecutionPlan, PlanProperties};
+use datafusion_proto::physical_plan::to_proto::serialize_partitioning;
+use datafusion_proto::physical_plan::DefaultPhysicalExtensionCodec;
 use futures::{TryFutureExt, TryStreamExt};
 use std::any::Any;
 use std::fmt::Formatter;
@@ -30,11 +32,11 @@ pub struct ArrowFlightReadExec {
 }
 
 impl ArrowFlightReadExec {
-    pub fn new(child: Arc<dyn ExecutionPlan>, partitions: usize) -> Self {
+    pub fn new(child: Arc<dyn ExecutionPlan>, partitioning: Partitioning) -> Self {
         Self {
             properties: PlanProperties::new(
                 EquivalenceProperties::new(child.schema()),
-                Partitioning::UnknownPartitioning(partitions),
+                partitioning,
                 EmissionType::Incremental,
                 Boundedness::Bounded,
             ),
@@ -91,7 +93,7 @@ impl ExecutionPlan for ArrowFlightReadExec {
         context: Arc<TaskContext>,
     ) -> datafusion::common::Result<SendableRecordBatchStream> {
         let runtime = context.runtime_env();
-        let output_partitions = self.properties.partitioning.partition_count();
+        let partitioning = self.properties.partitioning.clone();
 
         let channel_manager = ChannelManager::try_from_session(context.session_config())?;
         let current_stage_opt = context.session_config().get_extension::<StageContext>();
@@ -113,7 +115,7 @@ impl ExecutionPlan for ArrowFlightReadExec {
                             &channel_manager,
                             Some(&current_stage),
                             partition,
-                            output_partitions,
+                            partitioning,
                         ).await
                     } else {
                         // We are inside a stage, but we are not the delegate, so we need to
@@ -133,7 +135,7 @@ impl ExecutionPlan for ArrowFlightReadExec {
                         &channel_manager,
                         current_stage_opt.as_deref(),
                         partition,
-                        output_partitions,
+                        partitioning,
                     ).await
                 }
             }).await?;
@@ -152,7 +154,7 @@ impl ExecutionPlan for ArrowFlightReadExec {
             }
 
             if partition >= channels.len() {
-                return exec_err!("ChannelManager resolved an incorrect number of partitions. Expected {output_partitions}, got {}", channels.len());
+                return internal_err!("Invalid channel index {partition} with a total number of {} channels", channels.len());
             }
 
             let ticket = DoGet::new_remote_plan_exec_ticket(
@@ -189,8 +191,9 @@ async fn build_next_stage(
     channel_manager: &ChannelManager,
     current_stage: Option<&StageContext>,
     partition: usize,
-    output_partitions: usize,
+    partitioning: Partitioning,
 ) -> Result<(StageContext, Vec<ArrowFlightChannel>), DataFusionError> {
+    let output_partitions = partitioning.partition_count();
     let channels = channel_manager.get_n_channels(output_partitions).await?;
 
     let next_stage_context = StageContext {
@@ -200,6 +203,11 @@ async fn build_next_stage(
             caller: v.current,
             actors: v.actors.clone(),
         }),
+        partitioning: Some(serialize_partitioning(
+            &partitioning,
+            // TODO: this should be set by the user
+            &DefaultPhysicalExtensionCodec {},
+        )?),
         current: partition as u64,
         delegate: 0,
         actors: channels.iter().map(|t| t.url.to_string()).collect(),

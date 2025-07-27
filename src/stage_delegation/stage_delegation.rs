@@ -132,6 +132,7 @@ mod tests {
                 "http://localhost:8080".to_string(),
                 "http://localhost:8081".to_string(),
             ],
+            partitioning: Default::default()
         }
     }
 
@@ -267,6 +268,7 @@ mod tests {
                 "http://localhost:8080".to_string(),
                 "http://localhost:8081".to_string(),
             ],
+            partitioning: None
         };
 
         // Delegate adds info first

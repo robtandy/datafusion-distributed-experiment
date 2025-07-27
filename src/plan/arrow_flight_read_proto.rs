@@ -2,7 +2,10 @@ use crate::plan::arrow_flight_read::ArrowFlightReadExec;
 use datafusion::execution::runtime_env::RuntimeEnv;
 use datafusion::execution::FunctionRegistry;
 use datafusion::physical_plan::ExecutionPlan;
+use datafusion_proto::physical_plan::from_proto::parse_protobuf_partitioning;
+use datafusion_proto::physical_plan::to_proto::serialize_partitioning;
 use datafusion_proto::physical_plan::{AsExecutionPlan, PhysicalExtensionCodec};
+use datafusion_proto::protobuf;
 use datafusion_proto::protobuf::{proto_error, PhysicalPlanNode};
 use prost::bytes::BufMut;
 use prost::Message;
@@ -53,8 +56,8 @@ impl PhysicalExtensionCodec for ArrowFlightReadExecProtoCodec {
 pub struct ArrowFlightReadExecProto {
     #[prost(message, optional, boxed, tag = "1")]
     child: Option<Box<PhysicalPlanNode>>,
-    #[prost(uint64, tag = "2")]
-    partitions: u64,
+    #[prost(message, optional, tag = "2")]
+    partitioning: Option<protobuf::Partitioning>,
 }
 
 impl AsExecutionPlan for ArrowFlightReadExecProto {
@@ -84,10 +87,20 @@ impl AsExecutionPlan for ArrowFlightReadExecProto {
             return Err(proto_error("ArrowFlightReadExecProto must have a child"));
         };
 
-        Ok(Arc::new(ArrowFlightReadExec::new(
-            child.try_into_physical_plan(registry, runtime, extension_codec)?,
-            self.partitions as usize,
-        )))
+        let plan = child.try_into_physical_plan(registry, runtime, extension_codec)?;
+        let Some(partitioning) = parse_protobuf_partitioning(
+            self.partitioning.as_ref(),
+            registry,
+            &plan.schema(),
+            extension_codec,
+        )?
+        else {
+            return Err(proto_error(
+                "ArrowFlightReadExecProto is missing the partitioning scheme",
+            ));
+        };
+
+        Ok(Arc::new(ArrowFlightReadExec::new(plan, partitioning)))
     }
 
     fn try_from_physical_plan(
@@ -109,7 +122,10 @@ impl AsExecutionPlan for ArrowFlightReadExecProto {
         let child = node.children()[0];
 
         Ok(Self {
-            partitions: node.properties().partitioning.partition_count() as u64,
+            partitioning: Some(serialize_partitioning(
+                &node.properties().partitioning,
+                extension_codec,
+            )?),
             child: Some(Box::new(PhysicalPlanNode::try_from_physical_plan(
                 Arc::clone(child),
                 extension_codec,

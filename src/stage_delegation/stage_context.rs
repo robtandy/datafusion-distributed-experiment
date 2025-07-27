@@ -1,4 +1,5 @@
 use std::usize;
+use datafusion_proto::protobuf;
 
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct PreviousStage {
@@ -22,6 +23,8 @@ pub struct StageContext {
     pub delegate: u64,
     #[prost(string, repeated, tag = "5")]
     pub actors: Vec<String>,
+    #[prost(message, optional, tag = "6")]
+    pub partitioning: Option<protobuf::Partitioning>
 }
 
 impl StageContext {
@@ -36,6 +39,8 @@ impl StageContext {
 
 #[cfg(test)]
 mod tests {
+    use datafusion_proto::protobuf::partitioning::PartitionMethod;
+    use datafusion_proto::protobuf::PhysicalHashRepartition;
     use super::*;
 
     #[test]
@@ -56,6 +61,7 @@ mod tests {
                 "http://localhost:8080".to_string(),
                 "http://localhost:8081".to_string(),
             ],
+            partitioning: Default::default()
         };
 
         assert_eq!(context.id, "stage-123");
@@ -79,6 +85,7 @@ mod tests {
             current: 2,
             delegate: 3,
             actors: vec!["http://localhost:9000".to_string()],
+            partitioning: Some(protobuf::Partitioning::default())
         };
 
         assert_eq!(context.id, "stage-789");
@@ -96,6 +103,7 @@ mod tests {
             current: 5,
             delegate: 10,
             actors: vec![],
+            partitioning: Default::default()
         };
 
         assert_eq!(context.id, "empty-stage");
@@ -116,6 +124,7 @@ mod tests {
                 "http://localhost:8080".to_string(),
                 "http://localhost:8081".to_string(),
             ],
+            partitioning: Default::default()
         };
 
         let previous = context.to_previous();
@@ -136,6 +145,7 @@ mod tests {
             current: 2,
             delegate: 3,
             actors: vec!["http://localhost:8001".to_string()],
+            partitioning: Default::default()
         };
 
         let cloned = context.clone();
@@ -175,6 +185,7 @@ mod tests {
             current: 1,
             delegate: 2,
             actors: vec!["http://localhost:8080".to_string()],
+            partitioning: Default::default()
         };
 
         let context2 = StageContext {
@@ -183,6 +194,7 @@ mod tests {
             current: 1,
             delegate: 2,
             actors: vec!["http://localhost:8080".to_string()],
+            partitioning: Default::default()
         };
 
         let context3 = StageContext {
@@ -191,6 +203,7 @@ mod tests {
             current: 1,
             delegate: 2,
             actors: vec!["http://localhost:8080".to_string()],
+            partitioning: Default::default()
         };
 
         assert_eq!(context1, context2);
@@ -214,6 +227,7 @@ mod tests {
                 "http://actor1.com:8080".to_string(),
                 "http://actor2.com:8080".to_string(),
             ],
+            partitioning: Default::default()
         };
 
         // Serialize to bytes

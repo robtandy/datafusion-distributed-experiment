@@ -18,4 +18,4 @@ url = "2.5.4"
 uuid = "1.17.0"
 delegate = "0.13.4"
 dashmap = "6.1.0"
-prost = {  version = "0.13.5", features = [] }
+prost = "0.13.5"
