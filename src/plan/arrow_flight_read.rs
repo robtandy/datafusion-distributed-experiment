@@ -1,7 +1,7 @@
 use crate::channel_manager::{ArrowFlightChannel, ChannelManager};
 use crate::flight_service::{DoGet, DoPut};
 use crate::plan::arrow_flight_read_proto::ArrowFlightReadExecProtoCodec;
-use crate::stage_delegation::{PreviousStage, StageContext, StageDelegation};
+use crate::stage_delegation::{ActorContext, StageContext, StageDelegation};
 use arrow_flight::decode::FlightRecordBatchStream;
 use arrow_flight::error::FlightError;
 use arrow_flight::flight_service_client::FlightServiceClient;
@@ -21,7 +21,7 @@ use std::fmt::Formatter;
 use std::sync::Arc;
 use tokio::sync::OnceCell;
 use tonic::IntoRequest;
-use url::Url;
+use url::{ParseError, Url};
 use uuid::Uuid;
 
 #[derive(Debug, Clone)]
@@ -47,8 +47,13 @@ impl ArrowFlightReadExec {
 }
 
 impl DisplayAs for ArrowFlightReadExec {
-    fn fmt_as(&self, t: DisplayFormatType, f: &mut Formatter) -> std::fmt::Result {
-        write!(f, "ArrowFlightReadExec: partitioning={}", self.properties.partitioning)
+    fn fmt_as(&self, _t: DisplayFormatType, f: &mut Formatter) -> std::fmt::Result {
+        // TODO: render different things depending on `DisplayFormatType`
+        write!(
+            f,
+            "ArrowFlightReadExec: partitioning={}",
+            self.properties.partitioning
+        )
     }
 }
 
@@ -95,11 +100,17 @@ impl ExecutionPlan for ArrowFlightReadExec {
         let partitioning = self.properties.partitioning.clone();
 
         let channel_manager = ChannelManager::try_from_session(context.session_config())?;
+
+        let current_actor_opt = context.session_config().get_extension::<ActorContext>();
         let current_stage_opt = context.session_config().get_extension::<StageContext>();
         let stage_delegation_opt = context.session_config().get_extension::<StageDelegation>();
         if current_stage_opt.is_some() && stage_delegation_opt.is_none() {
             return internal_err!("No StageDelegation extension found in the SessionConfig even though a StageContext was present.");
         }
+        if current_stage_opt.is_some() && current_actor_opt.is_none() {
+            return internal_err!("No ActorContext extension found in the SessionConfig even though a StageContext was present.");
+        }
+        let current_actor = current_actor_opt.unwrap_or_default();
 
         let plan = Arc::clone(&self.child);
         let next_stage_context = Arc::clone(&self.next_stage_context_cell);
@@ -107,15 +118,10 @@ impl ExecutionPlan for ArrowFlightReadExec {
         let stream = async move {
             let (next_stage_context, channels) = next_stage_context.get_or_try_init(|| async {
                 if let Some(ref current_stage) = current_stage_opt {
-                    if current_stage.current == current_stage.delegate {
+                    if current_actor.actor_idx == current_stage.delegate {
                         // We are inside a stage, and we are the delegate, so need to
                         // build the channels and communicate them.
-                        build_next_stage(
-                            &channel_manager,
-                            Some(&current_stage),
-                            partition,
-                            partitioning,
-                        ).await
+                        build_next_stage(&channel_manager, Some(&current_stage), partitioning).await
                     } else {
                         // We are inside a stage, but we are not the delegate, so we need to
                         // wait for the delegate to tell us what the new channels are.
@@ -125,27 +131,23 @@ impl ExecutionPlan for ArrowFlightReadExec {
                         listen_to_next_stage(
                             &channel_manager,
                             &stage_delegation,
-                            current_stage.id.clone()
+                            current_stage.id.clone(),
+                            current_actor.actor_idx as usize
                         ).await
                     }
                 } else {
                     // We are not in a stage, the whole thing starts here.
-                    build_next_stage(
-                        &channel_manager,
-                        current_stage_opt.as_deref(),
-                        partition,
-                        partitioning,
-                    ).await
+                    build_next_stage(&channel_manager, None, partitioning).await
                 }
             }).await?;
 
             if let Some(current_stage) = current_stage_opt {
-                if current_stage.current == current_stage.delegate {
+                if current_actor.actor_idx == current_stage.delegate {
                     // We are the delegate, and it's our duty to communicate the next stage context
                     // to the other actors that are not us. They will be waiting for us to send
                     // them this info.
                     communicate_next_stage(
-                        &channel_manager,
+                        Arc::clone(&channel_manager),
                         current_stage.as_ref().clone(),
                         next_stage_context.clone()
                     ).await?;
@@ -156,11 +158,13 @@ impl ExecutionPlan for ArrowFlightReadExec {
                 return internal_err!("Invalid channel index {partition} with a total number of {} channels", channels.len());
             }
 
-            let mut next_stage_context = next_stage_context.clone();
-            next_stage_context.current = partition as u64;
             let ticket = DoGet::new_remote_plan_exec_ticket(
                 plan,
-                next_stage_context,
+                next_stage_context.clone(),
+                ActorContext {
+                    caller_actor_idx: current_actor.actor_idx,
+                    actor_idx: partition as u64,
+                },
                 // TODO: The user should be able to pass its own extension decoder.
                 &ArrowFlightReadExecProtoCodec::new(&runtime),
             )?;
@@ -191,7 +195,6 @@ impl ExecutionPlan for ArrowFlightReadExec {
 async fn build_next_stage(
     channel_manager: &ChannelManager,
     current_stage: Option<&StageContext>,
-    partition: usize,
     partitioning: Partitioning,
 ) -> Result<(StageContext, Vec<ArrowFlightChannel>), DataFusionError> {
     let output_partitions = partitioning.partition_count();
@@ -199,19 +202,14 @@ async fn build_next_stage(
 
     let next_stage_context = StageContext {
         id: Uuid::new_v4().to_string(),
-        previous_stage: current_stage.map(|v| PreviousStage {
-            id: v.id.clone(),
-            caller: v.current,
-            actors: v.actors.clone(),
-        }),
         partitioning: Some(serialize_partitioning(
             &partitioning,
             // TODO: this should be set by the user
             &DefaultPhysicalExtensionCodec {},
         )?),
-        current: partition as u64,
         delegate: 0,
         actors: channels.iter().map(|t| t.url.to_string()).collect(),
+        prev_actors: current_stage.map(|v| v.actors.len()).unwrap_or(1) as u64,
     };
     Ok((next_stage_context, channels))
 }
@@ -220,27 +218,31 @@ async fn build_next_stage(
 /// done by the delegate in a stage, as it's the one responsible for ensuring every actor in
 /// a stage knows how the next stage looks like.
 async fn communicate_next_stage(
-    channel_manager: &ChannelManager,
+    channel_manager: Arc<ChannelManager>,
     current_stage: StageContext,
     next_stage: StageContext,
 ) -> Result<(), DataFusionError> {
-    let urls = current_stage
+    let actors = current_stage
         .actors
         .iter()
         .enumerate()
         // Do not communicate to self.
-        .filter(|(i, _)| *i != current_stage.current as usize)
-        .map(|(_, url)| Url::parse(url.as_str()))
+        .filter(|(i, _)| *i != current_stage.delegate as usize)
+        .map(|(i, url)| Ok((i, Url::parse(url.as_str())?)))
         .collect::<Result<Vec<_>, _>>()
-        .map_err(|err| exec_datafusion_err!("Invalid actor Urls in next stage context: {err}"))?;
-    let current_actors = channel_manager.get_channels_for_urls(&urls).await?;
+        .map_err(|err: ParseError| {
+            exec_datafusion_err!("Invalid actor Urls in next stage context: {err}")
+        })?;
 
     let mut join_set = JoinSet::new();
-    for channel in current_actors {
+    for (actor_idx, url) in actors {
+        let stage_id = current_stage.id.clone();
         let next_stage = next_stage.clone();
+        let channel_manager = Arc::clone(&channel_manager);
         join_set.spawn(async move {
-            let flight_data = DoPut::new_stage_context_flight_data(next_stage);
+            let flight_data = DoPut::new_stage_context_flight_data(stage_id, actor_idx, next_stage);
 
+            let channel = channel_manager.get_channel_for_url(&url).await?;
             let mut client = FlightServiceClient::new(channel.channel.clone());
             client
                 .do_put(futures::stream::once(async move { flight_data }))
@@ -260,15 +262,22 @@ async fn communicate_next_stage(
 async fn listen_to_next_stage(
     channel_manager: &ChannelManager,
     stage_delegation: &StageDelegation,
-    id: String,
+    stage_id: String,
+    actor_idx: usize,
 ) -> Result<(StageContext, Vec<ArrowFlightChannel>), DataFusionError> {
-    let next_stage_context = stage_delegation.wait_for_delegate_info(id).await?;
+    let next_stage_context = stage_delegation
+        .wait_for_delegate_info(stage_id, actor_idx)
+        .await?;
     let urls = next_stage_context
         .actors
         .iter()
         .map(|a| Url::parse(a.as_str()))
         .collect::<Result<Vec<_>, _>>()
         .map_err(|err| exec_datafusion_err!("Invalid actor Urls in next stage context: {err}"))?;
-    let channels = channel_manager.get_channels_for_urls(&urls).await?;
+    let channel_futures = urls
+        .iter()
+        .map(|url| channel_manager.get_channel_for_url(url));
+
+    let channels = futures::future::try_join_all(channel_futures).await?;
     Ok((next_stage_context, channels))
 }

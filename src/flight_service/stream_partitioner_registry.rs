@@ -19,8 +19,8 @@ use tonic::codegen::tokio_stream::wrappers::ReceiverStream;
 /// is the number of output partitions.
 pub struct StreamPartitioner {
     schema: SchemaRef,
-    stream_task: SpawnedTask<()>,
     rxs: Mutex<Vec<Option<mpsc::Receiver<Result<RecordBatch, DataFusionError>>>>>,
+    _stream_task: SpawnedTask<()>,
 }
 
 impl StreamPartitioner {
@@ -92,13 +92,13 @@ impl StreamPartitioner {
         });
 
         Ok(Self {
-            stream_task,
+            _stream_task: stream_task,
             rxs: Mutex::new(rxs),
             schema,
         })
     }
 
-    /// Consumes the provided partition, streaming the context of the receiving end of the channel.
+    /// Consumes the provided partition, streaming the content from the receiving end of the channel.
     /// This function can only be called once per partition, upon the second call on the same
     /// partition this function will fail.
     pub fn stream_partition(
@@ -143,7 +143,7 @@ async fn fanout_error(
 /// by stage id.
 #[derive(Default)]
 pub struct StreamPartitionerRegistry {
-    map: DashMap<String, Arc<StreamPartitioner>>,
+    map: DashMap<(String, usize), Arc<StreamPartitioner>>,
 }
 
 impl StreamPartitionerRegistry {
@@ -152,11 +152,12 @@ impl StreamPartitionerRegistry {
     pub fn get_or_create_stream_partitioner(
         &self,
         id: String,
+        actor_idx: usize,
         plan: Arc<dyn ExecutionPlan>,
         partitioning: Partitioning,
         context: Arc<TaskContext>,
     ) -> Result<Arc<StreamPartitioner>, DataFusionError> {
-        match self.map.entry(id) {
+        match self.map.entry((id, actor_idx)) {
             Entry::Occupied(entry) => Ok(Arc::clone(entry.get())),
             Entry::Vacant(entry) => Ok(Arc::clone(&entry.insert(Arc::new(
                 StreamPartitioner::new(plan, partitioning, context)?,
@@ -180,6 +181,7 @@ mod tests {
         let registry = StreamPartitionerRegistry::default();
         let partitioner = registry.get_or_create_stream_partitioner(
             "test".to_string(),
+            0,
             mock_exec(15, 10),
             Partitioning::RoundRobinBatch(PARTITIONS),
             Arc::new(TaskContext::default()),
@@ -201,6 +203,7 @@ mod tests {
         let registry = StreamPartitionerRegistry::default();
         let partitioner = registry.get_or_create_stream_partitioner(
             "test".to_string(),
+            0,
             mock_exec(5, 10),
             Partitioning::RoundRobinBatch(PARTITIONS),
             Arc::new(TaskContext::default()),
@@ -219,6 +222,7 @@ mod tests {
         let registry = StreamPartitionerRegistry::default();
         let partitioner = registry.get_or_create_stream_partitioner(
             "test".to_string(),
+            0,
             mock_exec(15, 10),
             Partitioning::Hash(vec![col("c0", &test_schema())?], PARTITIONS),
             Arc::new(TaskContext::default()),
@@ -240,6 +244,7 @@ mod tests {
         let registry = StreamPartitionerRegistry::default();
         let partitioner = registry.get_or_create_stream_partitioner(
             "test".to_string(),
+            0,
             mock_exec(5, 10),
             Partitioning::Hash(vec![col("c0", &test_schema())?], PARTITIONS),
             Arc::new(TaskContext::default()),

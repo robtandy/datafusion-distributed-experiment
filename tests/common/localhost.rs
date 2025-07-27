@@ -76,20 +76,13 @@ impl ChannelResolver for LocalHostChannelResolver {
         Ok(result)
     }
 
-    async fn get_channels_for_urls(
-        &self,
-        urls: &[Url],
-    ) -> Result<Vec<ArrowFlightChannel>, DataFusionError> {
-        let mut result = vec![];
-        for url in urls {
-            let endpoint = Channel::from_shared(url.to_string()).map_err(external_err)?;
-            let channel = endpoint.connect().await.map_err(external_err)?;
-            result.push(ArrowFlightChannel {
-                url: url.clone(),
-                channel: BoxCloneSyncChannel::new(channel),
-            })
-        }
-        Ok(result)
+    async fn get_channel_for_url(&self, url: &Url) -> Result<ArrowFlightChannel, DataFusionError> {
+        let endpoint = Channel::from_shared(url.to_string()).map_err(external_err)?;
+        let channel = endpoint.connect().await.map_err(external_err)?;
+        Ok(ArrowFlightChannel {
+            url: url.clone(),
+            channel: BoxCloneSyncChannel::new(channel),
+        })
     }
 }
 

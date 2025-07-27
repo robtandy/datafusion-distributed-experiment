@@ -5,7 +5,7 @@ mod tests {
     use crate::assert_snapshot;
     use crate::common::localhost::start_localhost_context;
     use crate::common::parquet::register_parquet_tables;
-    use crate::common::plan::distribute_hash_repartition_exec;
+    use crate::common::plan::distribute_aggregate;
     use datafusion::arrow::util::pretty::pretty_format_batches;
     use datafusion::physical_plan::{displayable, execute_stream};
     use futures::TryStreamExt;
@@ -22,7 +22,7 @@ mod tests {
         let physical = df.create_physical_plan().await?;
         let physical_str = displayable(physical.as_ref()).indent(true).to_string();
 
-        let physical_distributed = distribute_hash_repartition_exec(physical.clone())?;
+        let physical_distributed = distribute_aggregate(physical.clone())?;
         let physical_distributed_str = displayable(physical_distributed.as_ref())
             .indent(true)
             .to_string();
@@ -48,12 +48,14 @@ mod tests {
           SortPreservingMergeExec: [count(Int64(1))@2 ASC NULLS LAST]
             SortExec: expr=[count(Int64(1))@2 ASC NULLS LAST], preserve_partitioning=[true]
               ProjectionExec: expr=[count(Int64(1))@1 as count(*), RainToday@0 as RainToday, count(Int64(1))@1 as count(Int64(1))]
-                AggregateExec: mode=FinalPartitioned, gby=[RainToday@0 as RainToday], aggr=[count(Int64(1))]
-                  ArrowFlightReadExec: partitioning=Hash([RainToday@0], 10)
+                ArrowFlightReadExec: partitioning=RoundRobinBatch(8)
+                  AggregateExec: mode=FinalPartitioned, gby=[RainToday@0 as RainToday], aggr=[count(Int64(1))]
                     CoalesceBatchesExec: target_batch_size=8192
-                      RepartitionExec: partitioning=RoundRobinBatch(10), input_partitions=1
-                        AggregateExec: mode=Partial, gby=[RainToday@0 as RainToday], aggr=[count(Int64(1))]
-                          DataSourceExec: file_groups={1 group: [[/testdata/weather.parquet]]}, projection=[RainToday], file_type=parquet
+                      RepartitionExec: partitioning=Hash([RainToday@0], 10), input_partitions=10
+                        RepartitionExec: partitioning=RoundRobinBatch(10), input_partitions=1
+                          ArrowFlightReadExec: partitioning=Hash([RainToday@0], 1)
+                            AggregateExec: mode=Partial, gby=[RainToday@0 as RainToday], aggr=[count(Int64(1))]
+                              DataSourceExec: file_groups={1 group: [[/testdata/weather.parquet]]}, projection=[RainToday], file_type=parquet
         ",
         );
 
@@ -72,7 +74,6 @@ mod tests {
         +----------+-----------+
         ");
 
-        // TODO: this is wrong
         let batches_distributed = pretty_format_batches(
             &execute_stream(physical_distributed, ctx.task_ctx())?
                 .try_collect::<Vec<_>>()

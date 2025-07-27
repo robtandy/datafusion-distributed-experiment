@@ -15,13 +15,31 @@ pub struct DoPut {
 #[derive(Clone, PartialEq, ::prost::Oneof)]
 pub enum DoPutInner {
     #[prost(message, tag = "1")]
-    StageContext(StageContext),
+    StageContext(StageContextExt),
+}
+
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct StageContextExt {
+    #[prost(message, optional, tag = "1")]
+    pub stage_context: Option<StageContext>,
+    #[prost(string, tag = "2")]
+    pub stage_id: String,
+    #[prost(uint64, tag = "3")]
+    pub actor_idx: u64,
 }
 
 impl DoPut {
-    pub fn new_stage_context_flight_data(stage_context: StageContext) -> FlightData {
+    pub fn new_stage_context_flight_data(
+        stage_id: String,
+        actor_idx: usize,
+        next_stage_context: StageContext,
+    ) -> FlightData {
         let this = Self {
-            inner: Some(DoPutInner::StageContext(stage_context)),
+            inner: Some(DoPutInner::StageContext(StageContextExt {
+                stage_id,
+                actor_idx: actor_idx as u64,
+                stage_context: Some(next_stage_context),
+            })),
         };
 
         let flight_data = FlightData::new().with_data_body(this.encode_to_vec());
@@ -43,9 +61,14 @@ impl ArrowFlightEndpoint {
                 return Err(Status::invalid_argument("DoPut message is empty"));
             };
             match action {
-                DoPutInner::StageContext(stage_context) => {
+                DoPutInner::StageContext(stage_context_ext) => {
+                    let Some(stage_context) = stage_context_ext.stage_context else {
+                        return Err(Status::invalid_argument("StageContext is empty"));
+                    };
+                    let stage_id = stage_context_ext.stage_id;
+                    let actor_idx = stage_context_ext.actor_idx as usize;
                     self.stage_delegation
-                        .add_delegate_info(stage_context)
+                        .add_delegate_info(stage_id, actor_idx, stage_context)
                         .map_err(|err| {
                             Status::internal(format!(
                                 "Cannot add delegate to stage_delegation: {err}"

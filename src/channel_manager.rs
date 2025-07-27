@@ -30,10 +30,7 @@ pub struct ArrowFlightChannel {
 #[async_trait]
 pub trait ChannelResolver {
     async fn get_n_channels(&self, n: usize) -> Result<Vec<ArrowFlightChannel>, DataFusionError>;
-    async fn get_channels_for_urls(
-        &self,
-        urls: &[Url],
-    ) -> Result<Vec<ArrowFlightChannel>, DataFusionError>;
+    async fn get_channel_for_url(&self, url: &Url) -> Result<ArrowFlightChannel, DataFusionError>;
 }
 
 impl ChannelManager {
@@ -46,7 +43,7 @@ impl ChannelManager {
     delegate! {
         to self.0 {
             pub async fn get_n_channels(&self, n: usize) -> Result<Vec<ArrowFlightChannel>, DataFusionError>;
-            pub async fn get_channels_for_urls(&self, urls: &[Url]) -> Result<Vec<ArrowFlightChannel>, DataFusionError>;
+            pub async fn get_channel_for_url(&self, url: &Url) -> Result<ArrowFlightChannel, DataFusionError>;
         }
     }
 }
