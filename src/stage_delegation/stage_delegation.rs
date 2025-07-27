@@ -29,6 +29,7 @@ use tokio::sync::oneshot;
 /// On 2, the `wait_for_delegate_info` call will create an entry in the [DashMap] with a
 /// [oneshot::Sender], and listen on the other end of the channel [oneshot::Receiver] for
 /// the delegate to put something there.
+#[derive(Default)]
 pub struct StageDelegation {
     stage_targets: DashMap<String, Oneof>,
 }
@@ -104,14 +105,6 @@ impl StageDelegation {
 enum Oneof {
     Sender(oneshot::Sender<StageContext>),
     Receiver(oneshot::Receiver<StageContext>),
-}
-
-impl Default for StageDelegation {
-    fn default() -> Self {
-        Self {
-            stage_targets: DashMap::new(),
-        }
-    }
 }
 
 #[cfg(test)]

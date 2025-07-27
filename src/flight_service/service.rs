@@ -11,12 +11,24 @@ use datafusion::execution::runtime_env::RuntimeEnv;
 use futures::stream::BoxStream;
 use std::sync::Arc;
 use tonic::{Request, Response, Status, Streaming};
+use crate::ChannelResolver;
 
 pub struct ArrowFlightEndpoint {
     pub(super) channel_manager: Arc<ChannelManager>,
     pub(super) stage_delegation: Arc<StageDelegation>,
     pub(super) runtime: Arc<RuntimeEnv>,
     pub(super) partitioner_registry: Arc<StreamPartitionerRegistry>,
+}
+
+impl ArrowFlightEndpoint {
+    pub fn new(channel_resolver: impl ChannelResolver + Send + Sync + 'static) -> Self {
+        Self {
+            channel_manager: Arc::new(ChannelManager::new(channel_resolver)),
+            stage_delegation: Arc::new(StageDelegation::default()),
+            runtime: Arc::new(RuntimeEnv::default()),
+            partitioner_registry: Arc::new(StreamPartitionerRegistry::default()),
+        }
+    }
 }
 
 #[async_trait]

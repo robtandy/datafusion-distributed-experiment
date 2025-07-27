@@ -15,14 +15,16 @@ impl ChannelManager {
     }
 }
 
+pub type BoxCloneSyncChannel = tower::util::BoxCloneSyncService<
+    http::Request<BoxBody>,
+    http::Response<BoxBody>,
+    tonic::transport::Error,
+>;
+
 #[derive(Clone, Debug)]
 pub struct ArrowFlightChannel {
     pub url: Url,
-    pub channel: tower::util::BoxCloneSyncService<
-        http::Request<BoxBody>,
-        http::Response<BoxBody>,
-        tonic::transport::Error,
-    >,
+    pub channel: BoxCloneSyncChannel,
 }
 
 #[async_trait]

@@ -19,3 +19,6 @@ uuid = "1.17.0"
 delegate = "0.13.4"
 dashmap = "6.1.0"
 prost = "0.13.5"
+
+[dev-dependencies]
+insta = { version = "1.43.1" , features = ["filters"]}

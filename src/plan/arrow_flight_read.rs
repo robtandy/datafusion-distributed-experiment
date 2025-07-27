@@ -48,8 +48,7 @@ impl ArrowFlightReadExec {
 
 impl DisplayAs for ArrowFlightReadExec {
     fn fmt_as(&self, t: DisplayFormatType, f: &mut Formatter) -> std::fmt::Result {
-        // TODO
-        write!(f, "ArrowFlightReadExec")
+        write!(f, "ArrowFlightReadExec: partitioning={}", self.properties.partitioning)
     }
 }
 
@@ -157,9 +156,11 @@ impl ExecutionPlan for ArrowFlightReadExec {
                 return internal_err!("Invalid channel index {partition} with a total number of {} channels", channels.len());
             }
 
+            let mut next_stage_context = next_stage_context.clone();
+            next_stage_context.current = partition as u64;
             let ticket = DoGet::new_remote_plan_exec_ticket(
                 plan,
-                next_stage_context.clone(),
+                next_stage_context,
                 // TODO: The user should be able to pass its own extension decoder.
                 &ArrowFlightReadExecProtoCodec::new(&runtime),
             )?;
