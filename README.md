@@ -292,3 +292,8 @@ about the next stage (the second one) to its peer actors.
                               │      10.0.0.25       │
                               └──────────┬───────────┘
 ```
+
+
+# Example
+
+There's an example about how this looks like in [tests/localhost.rs](./tests/localhost.rs)
