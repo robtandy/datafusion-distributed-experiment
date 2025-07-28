@@ -48,12 +48,25 @@ impl ArrowFlightReadExec {
 
 impl DisplayAs for ArrowFlightReadExec {
     fn fmt_as(&self, _t: DisplayFormatType, f: &mut Formatter) -> std::fmt::Result {
-        // TODO: render different things depending on `DisplayFormatType`
-        write!(
-            f,
-            "ArrowFlightReadExec: partitioning={}",
-            self.properties.partitioning
-        )
+        match &self.properties.partitioning {
+            Partitioning::RoundRobinBatch(size) => {
+                write!(f, "ArrowFlightReadExec: input_actors={size}")
+            }
+            Partitioning::Hash(phy_exprs, size) => {
+                let phy_exprs_str = phy_exprs
+                    .iter()
+                    .map(|e| format!("{e}"))
+                    .collect::<Vec<String>>()
+                    .join(", ");
+                write!(
+                    f,
+                    "ArrowFlightReadExec: input_actors={size} hash=[{phy_exprs_str}]"
+                )
+            }
+            Partitioning::UnknownPartitioning(size) => {
+                write!(f, "ArrowFlightReadExec: input_actors={size}")
+            }
+        }
     }
 }
 
