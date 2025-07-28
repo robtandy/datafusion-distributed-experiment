@@ -6,6 +6,18 @@ providing an out-of-the-box solution, it aims to be the foundational building bl
 distributed engines can be built using DataFusion.
 
 
+## Motivation
+
+The goal of this project is to provide a framework of reusable components for building a distributed
+execution engine on top of DataFusion. Instead of providing an executable binary or an opinionated framework, 
+it provides a library as close as possible to vanilla DataFusion that allows developers to build their
+own distributed engine based on their own rules. The core tenets are:
+
+- Be as close to vanilla DataFusion as possible.
+- Be unopinionated about the networking setup.
+- Be unopinionated about what makes sense to distribute and what not.
+- Be performant, adding as little overhead as possible to the equivalent non-distributed query.
+
 ## Architecture
 
 There are two main core components that allow a plan to be distributed:
@@ -176,7 +188,7 @@ First, the delegate resolves its IP:
                               └──────────┬───────────┘
 ```
 
-Then, the delegate communicates its actor colleagues how does the next stage look like:
+Then, the delegate communicates to its actor colleagues what the next stage looks like:
 ```
                              next stage                 next stage
                         actors: [10.0.0.25]        actors: [10.0.0.25]
@@ -195,7 +207,7 @@ Then, the delegate communicates its actor colleagues how does the next stage loo
                               └──────────┬───────────┘
 ```
 
-Then, all actors start querying the same `ArrowFlightEndpoint`
+Then, all actors start querying the same `ArrowFlightEndpoint`:
 
 ```
    ┌──────────┴───────────┐   ┌──────────┴───────────┐   ┌───────────┴──────────┐
@@ -251,49 +263,49 @@ Zooming in into the `ArrowFlightReadExec` node, it will look like this:
                               ┌──────────┴───────────┐
                               │  ArrowFlightReadExec │
                               └──────────────────────┘  
-                                     next stage             
-                    actors: [10.0.0.10, 10.0.0.11, 10.0.0.12]
-              ┌────────────────────────┘ │ └─────────────────────────┐           
-   ┌──────────┴───────────┐   ┌──────────┴───────────┐   ┌───────────┴──────────┐
-   │ ArrowFlightEndpoint  │   │ ArrowFlightEndpoint  │   │ ArrowFlightEndpoint  │
-   │      10.0.0.10       │   │      10.0.0.11       │   │       10.0.0.12      │
-   └──────────┬───────────┘   └──────────┬───────────┘   └───────────┬──────────┘
-        StageContext:              StageContext:               StageContext:
-         actors: [                   actors: [                   actors: [  
-          10.0.0.10,                   10.0.0.10,                  10.0.0.10,
-          10.0.0.11,                   10.0.0.11,                  10.0.0.11,
-          10.0.0.12                    10.0.0.12                   10.0.0.12 
-         ]                           ]                           ]          
-         delegate: 0                 delegate: 0                 delegate: 0
-        ActorContext:              ActorContext:               ActorContext:
-         actor_idx: 0                actor_idx: 1                actor_idx: 2
+                                     next stage                                      ┐
+                    actors: [10.0.0.10, 10.0.0.11, 10.0.0.12]                        │
+              ┌────────────────────────┘ │ └─────────────────────────┐               │
+   ┌──────────┴───────────┐   ┌──────────┴───────────┐   ┌───────────┴──────────┐    │
+   │ ArrowFlightEndpoint  │   │ ArrowFlightEndpoint  │   │ ArrowFlightEndpoint  │    │
+   │      10.0.0.10       │   │      10.0.0.11       │   │       10.0.0.12      │    │
+   └──────────┬───────────┘   └──────────┬───────────┘   └───────────┬──────────┘    │ 
+        StageContext:              StageContext:               StageContext:         │ 
+         actors: [                   actors: [                   actors: [           │ stage 1
+          10.0.0.10,                   10.0.0.10,                  10.0.0.10,        │ 
+          10.0.0.11,                   10.0.0.11,                  10.0.0.11,        │ 
+          10.0.0.12                    10.0.0.12                   10.0.0.12         │  
+         ]                           ]                           ]                   │      
+         delegate: 0                 delegate: 0                 delegate: 0         │    
+        ActorContext:              ActorContext:               ActorContext:         │       
+         actor_idx: 0                actor_idx: 1                actor_idx: 2        │      
 ```
 
 With this, the delegate of the first stage has all the information necessary for communicating details
-about the next stage (the second one) to its peer actors.
+about the next stage (the second one) to its peer actors from the current stage (the first one).
 ```
-              │
-       StageContext:
-        actors: [  
-         10.0.0.10,
-         10.0.0.11,
-         10.0.0.12
-        ] 
-        delegate: 0     ┌────────┬──────────────────────────┐
-       ActorContext:    │    10.0.0.11                  10.0.0.12
-        actor_idx: 0    │        ▼                          ▼        
-   ┌──────────┴─────────┴─┐   ┌──────────┴───────────┐   ┌───────────┴──────────┐
-   │ ArrowFlightReadExec  │   │ ArrowFlightReadExec  │   │ ArrowFlightReadExec  │
-   │      (delegate)      │   │       (actor)        │   │        (actor)       │
-   └──────────┬───────────┘   └──────────────────────┘   └──────────────────────┘
-              └────────────────────────┐
-                              ┌──────────────────────┐
-                              │  ArrowFlightEndpoint │
-                              │      10.0.0.25       │
-                              └──────────┬───────────┘
+              │                                                                       
+       StageContext:                                                                 │
+        actors: [                                                                    │
+         10.0.0.10,                                                                  │
+         10.0.0.11,                                                                  │
+         10.0.0.12                                                                   │
+        ]                                                                            │
+        delegate: 0     ┌────────┬──────────────────────────┐                        │ stage 1
+       ActorContext:    │    10.0.0.11                  10.0.0.12                    │
+        actor_idx: 0    │        ▼                          ▼                        │
+   ┌──────────┴─────────┴─┐   ┌──────────┴───────────┐   ┌───────────┴──────────┐    │
+   │ ArrowFlightReadExec  │   │ ArrowFlightReadExec  │   │ ArrowFlightReadExec  │    │
+   │      (delegate)      │   │       (actor)        │   │        (actor)       │    │
+   └──────────┬───────────┘   └──────────────────────┘   └──────────────────────┘    ┘
+              └────────────────────────┐                                             ┐
+                              ┌──────────────────────┐                               │
+                              │  ArrowFlightEndpoint │                               │
+                              │      10.0.0.25       │                               │ stage 2
+                              └──────────┬───────────┘                               │
 ```
 
 
 # Example
 
-There's an example about what this looks like in [tests/localhost.rs](./tests/localhost.rs)
+There's an example about what this looks like in [tests/distributed_aggregation.rs](./tests/distributed_aggregation.rs)
