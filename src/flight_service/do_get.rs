@@ -24,7 +24,7 @@ pub struct DoGet {
     pub inner: Option<DoGetInner>,
 }
 
-#[derive(Clone, PartialEq, ::prost::Oneof)]
+#[derive(Clone, PartialEq, prost::Oneof)]
 pub enum DoGetInner {
     #[prost(message, tag = "1")]
     RemotePlanExec(RemotePlanExec),
@@ -73,9 +73,7 @@ impl ArrowFlightEndpoint {
             return invalid_argument("DoGet message is empty");
         };
 
-        let action = match action {
-            DoGetInner::RemotePlanExec(value) => value,
-        };
+        let DoGetInner::RemotePlanExec(action) = action;
 
         let mut state = SessionStateBuilder::new()
             .with_runtime_env(Arc::clone(&self.runtime))

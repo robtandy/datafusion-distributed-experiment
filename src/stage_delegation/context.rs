@@ -1,4 +1,3 @@
-use std::usize;
 use datafusion_proto::protobuf;
 
 /// Contains the necessary context for actors in a stage to perform a distributed query.

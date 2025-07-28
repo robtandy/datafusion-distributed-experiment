@@ -1,5 +1,5 @@
-mod stage_context;
-mod stage_delegation;
+mod context;
+mod delegation;
 
-pub use stage_context::{StageContext, ActorContext};
-pub use stage_delegation::StageDelegation;
+pub use context::{StageContext, ActorContext};
+pub use delegation::StageDelegation;

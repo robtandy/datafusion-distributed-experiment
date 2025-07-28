@@ -134,7 +134,7 @@ impl ExecutionPlan for ArrowFlightReadExec {
                     if current_actor.actor_idx == current_stage.delegate {
                         // We are inside a stage, and we are the delegate, so need to
                         // build the channels and communicate them.
-                        build_next_stage(&channel_manager, Some(&current_stage), partitioning).await
+                        build_next_stage(&channel_manager, Some(current_stage), partitioning).await
                     } else {
                         // We are inside a stage, but we are not the delegate, so we need to
                         // wait for the delegate to tell us what the new channels are.

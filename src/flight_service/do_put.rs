@@ -12,7 +12,7 @@ pub struct DoPut {
     pub inner: Option<DoPutInner>,
 }
 
-#[derive(Clone, PartialEq, ::prost::Oneof)]
+#[derive(Clone, PartialEq, prost::Oneof)]
 pub enum DoPutInner {
     #[prost(message, tag = "1")]
     StageContext(StageContextExt),
@@ -42,8 +42,7 @@ impl DoPut {
             })),
         };
 
-        let flight_data = FlightData::new().with_data_body(this.encode_to_vec());
-        flight_data
+        FlightData::new().with_data_body(this.encode_to_vec())
     }
 }
 

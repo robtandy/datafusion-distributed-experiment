@@ -3,14 +3,12 @@ use datafusion::arrow::datatypes::SchemaRef;
 use datafusion::common::{DataFusionError, Statistics};
 use datafusion::execution::{SendableRecordBatchStream, TaskContext};
 use datafusion::physical_expr::{EquivalenceProperties, Partitioning};
+use datafusion::physical_plan::common::compute_record_batch_statistics;
 use datafusion::physical_plan::execution_plan::{Boundedness, EmissionType};
 use datafusion::physical_plan::stream::{RecordBatchReceiverStream, RecordBatchStreamAdapter};
-use datafusion::physical_plan::{
-    common, DisplayAs, DisplayFormatType, ExecutionPlan, PlanProperties,
-};
+use datafusion::physical_plan::{DisplayAs, DisplayFormatType, ExecutionPlan, PlanProperties};
 use std::any::Any;
 use std::sync::Arc;
-
 // Copied from https://github.com/apache/datafusion/blob/4b9a468cc1949062cf3cd8685ba8ced377fd212e/datafusion/physical-plan/src/test/exec.rs#L121
 
 /// A Mock ExecutionPlan that can be used for writing tests of other
@@ -170,11 +168,7 @@ impl ExecutionPlan for MockExec {
 
         let data = data?;
 
-        Ok(common::compute_record_batch_statistics(
-            &[data],
-            &self.schema,
-            None,
-        ))
+        Ok(compute_record_batch_statistics(&[data], &self.schema, None))
     }
 }
 

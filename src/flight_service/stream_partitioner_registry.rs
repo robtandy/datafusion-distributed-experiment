@@ -19,9 +19,11 @@ use tonic::codegen::tokio_stream::wrappers::ReceiverStream;
 /// is the number of output partitions.
 pub struct StreamPartitioner {
     schema: SchemaRef,
-    rxs: Mutex<Vec<Option<mpsc::Receiver<Result<RecordBatch, DataFusionError>>>>>,
+    rxs: Mutex<Vec<Option<RecordBatchReceiver>>>,
     _stream_task: SpawnedTask<()>,
 }
+
+type RecordBatchReceiver = mpsc::Receiver<Result<RecordBatch, DataFusionError>>;
 
 impl StreamPartitioner {
     /// Builds a new [StreamPartitioner] that executes the provided [ExecutionPlan] and
@@ -68,8 +70,8 @@ impl StreamPartitioner {
                 // for each 1 batch in the input stream.
                 let mut join_set = JoinSet::new();
                 if let Err(err) = partitioner.partition(batch, |i, batch| {
-                    // produce the partitioned RecordBatch in the appropriate partition transmitter.
-                    // the rx receiving end consuming partition `i` will see this message soon.
+                    // Produce the partitioned RecordBatch in the appropriate partition transmitter.
+                    // The rx receiving end currently consuming partition `i` will see this message soon.
                     let tx = txs[i].clone();
                     join_set.spawn(async move { tx.send(Ok(batch)).await });
                     Ok(())
@@ -252,10 +254,7 @@ mod tests {
 
         let rows_per_partition = gather_rows_per_partition(&partitioner).await;
 
-        assert_eq!(
-            rows_per_partition,
-            vec![10, 5, 0, 15, 0, 5, 0, 5, 5, 5]
-        );
+        assert_eq!(rows_per_partition, vec![10, 5, 0, 15, 0, 5, 0, 5, 5, 5]);
         Ok(())
     }
 

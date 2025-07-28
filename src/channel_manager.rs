@@ -35,9 +35,9 @@ pub trait ChannelResolver {
 
 impl ChannelManager {
     pub fn try_from_session(session: &SessionConfig) -> Result<Arc<Self>, DataFusionError> {
-        Ok(session
+        session
             .get_extension::<ChannelManager>()
-            .ok_or_else(|| internal_datafusion_err!("No extension ChannelManager"))?)
+            .ok_or_else(|| internal_datafusion_err!("No extension ChannelManager"))
     }
 
     delegate! {
