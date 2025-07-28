@@ -211,10 +211,10 @@ Then, all actors start querying the same `ArrowFlightEndpoint`
                               └──────────┬───────────┘
 ```
 
-But wait, how do the `delegate` know what are the IPs of its peer actors? the `delegate` cannot
+But wait, how does the `delegate` know what are the IPs of its peer actors? the `delegate` cannot
 just go to two other random nodes hoping that they actually belong to the same stage.
 
-This is solved by propagating two things a `StageContext` between stages that contain information about
+This is solved by propagating a `StageContext` between stages that contain information about
 what actors are involved in the stage, and this must have been done at the beginning, when the 
 first stage was created here.
 
@@ -229,8 +229,8 @@ first stage was created here.
                               └──────────────────────┘  
                                          ▲
                               ┌──────────┴───────────┐
-                              │  ArrowFlightReadExec │ <- This one is responsible for propagating the StageContext
-                              └──────────────────────┘  
+                              │  ArrowFlightReadExec │ <-This one is responsible 
+                              └──────────────────────┘   for propagating the StageContext
                                        ▲ ▲ ▲                                         ┐
               ┌────────────────────────┘ │ └─────────────────────────┐               │
    ┌──────────┴───────────┐   ┌──────────┴───────────┐   ┌───────────┴──────────┐    │
@@ -296,4 +296,4 @@ about the next stage (the second one) to its peer actors.
 
 # Example
 
-There's an example about how this looks like in [tests/localhost.rs](./tests/localhost.rs)
+There's an example about what this looks like in [tests/localhost.rs](./tests/localhost.rs)
