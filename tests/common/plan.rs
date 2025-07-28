@@ -29,8 +29,17 @@ pub fn distribute_aggregate(
                         .iter()
                         .map(|(v, _)| Arc::clone(v))
                         .collect::<Vec<_>>();
-                    let node = ArrowFlightReadExec::new(node, Partitioning::Hash(expr, 1));
-                    Ok(Transformed::yes(Arc::new(node)))
+
+                    if node.children().len() != 1 {
+                        return plan_err!("Aggregate must have exactly one child");
+                    }
+                    let child = node.children()[0].clone();
+
+                    let node = node.with_new_children(vec![Arc::new(ArrowFlightReadExec::new(
+                        child,
+                        Partitioning::Hash(expr, 1),
+                    ))])?;
+                    Ok(Transformed::yes(node))
                 }
                 AggregateMode::Final
                 | AggregateMode::FinalPartitioned
@@ -40,8 +49,16 @@ pub fn distribute_aggregate(
                         return plan_err!("No partial aggregate found before the final one");
                     }
 
-                    let node = ArrowFlightReadExec::new(node, Partitioning::RoundRobinBatch(8));
-                    Ok(Transformed::yes(Arc::new(node)))
+                    if node.children().len() != 1 {
+                        return plan_err!("Aggregate must have exactly one child");
+                    }
+                    let child = node.children()[0].clone();
+
+                    let node = node.with_new_children(vec![Arc::new(ArrowFlightReadExec::new(
+                        child,
+                        Partitioning::RoundRobinBatch(8),
+                    ))])?;
+                    Ok(Transformed::yes(node))
                 }
             }
         })?
