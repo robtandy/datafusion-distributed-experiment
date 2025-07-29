@@ -1,7 +1,11 @@
 use crate::plan::arrow_flight_read::ArrowFlightReadExec;
+use datafusion::arrow::datatypes::Schema;
+use datafusion::common::internal_datafusion_err;
 use datafusion::execution::runtime_env::RuntimeEnv;
 use datafusion::execution::FunctionRegistry;
-use datafusion::physical_plan::ExecutionPlan;
+use datafusion::physical_expr::EquivalenceProperties;
+use datafusion::physical_plan::execution_plan::{Boundedness, EmissionType};
+use datafusion::physical_plan::{ExecutionPlan, PlanProperties};
 use datafusion_proto::physical_plan::from_proto::parse_protobuf_partitioning;
 use datafusion_proto::physical_plan::to_proto::serialize_partitioning;
 use datafusion_proto::physical_plan::{AsExecutionPlan, PhysicalExtensionCodec};
@@ -54,10 +58,10 @@ impl PhysicalExtensionCodec for ArrowFlightReadExecProtoCodec {
 /// to send them over the wire.
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ArrowFlightReadExecProto {
-    #[prost(message, optional, boxed, tag = "1")]
-    child: Option<Box<PhysicalPlanNode>>,
-    #[prost(message, optional, tag = "2")]
+    #[prost(message, optional, tag = "1")]
     partitioning: Option<protobuf::Partitioning>,
+    #[prost(message, optional, tag = "2")]
+    schema: Option<protobuf::Schema>,
 }
 
 impl AsExecutionPlan for ArrowFlightReadExecProto {
@@ -83,24 +87,32 @@ impl AsExecutionPlan for ArrowFlightReadExecProto {
         runtime: &RuntimeEnv,
         extension_codec: &dyn PhysicalExtensionCodec,
     ) -> datafusion::common::Result<Arc<dyn ExecutionPlan>> {
-        let Some(child) = &self.child else {
-            return Err(proto_error("ArrowFlightReadExecProto must have a child"));
-        };
+        let schema: Schema = self
+            .schema
+            .as_ref()
+            .ok_or(internal_datafusion_err!("missing schema in proto"))?
+            .try_into()?;
 
-        let plan = child.try_into_physical_plan(registry, runtime, extension_codec)?;
-        let Some(partitioning) = parse_protobuf_partitioning(
+        let partitioning = parse_protobuf_partitioning(
             self.partitioning.as_ref(),
             registry,
-            &plan.schema(),
+            &schema,
             extension_codec,
         )?
-        else {
-            return Err(proto_error(
-                "ArrowFlightReadExecProto is missing the partitioning scheme",
-            ));
-        };
+        .ok_or(internal_datafusion_err!(
+            "could not decode partitioning from proto"
+        ))?;
 
-        Ok(Arc::new(ArrowFlightReadExec::new(plan, partitioning)))
+        let properties = PlanProperties::new(
+            EquivalenceProperties::new(Arc::new(schema)),
+            partitioning.clone(),
+            EmissionType::Incremental,
+            Boundedness::Bounded,
+        );
+
+        Ok(Arc::new(ArrowFlightReadExec::new_from_properties(
+            properties,
+        )))
     }
 
     fn try_from_physical_plan(
@@ -113,23 +125,13 @@ impl AsExecutionPlan for ArrowFlightReadExecProto {
         let Some(node) = plan.as_any().downcast_ref::<ArrowFlightReadExec>() else {
             return Err(proto_error("Only ArrowFlightReadExec is supported"));
         };
-        if node.children().len() != 1 {
-            return Err(proto_error(format!(
-                "Expected ArrowFlightReadExec to have exactly 1 child, got {}",
-                node.children().len()
-            )));
-        }
-        let child = node.children()[0];
 
         Ok(Self {
             partitioning: Some(serialize_partitioning(
                 &node.properties().partitioning,
                 extension_codec,
             )?),
-            child: Some(Box::new(PhysicalPlanNode::try_from_physical_plan(
-                Arc::clone(child),
-                extension_codec,
-            )?)),
+            schema: Some(plan.schema().try_into()?),
         })
     }
 }
