@@ -1,6 +1,5 @@
 use crate::flight_service::service::ArrowFlightEndpoint;
 use crate::plan::ArrowFlightReadExecProtoCodec;
-use crate::stage_delegation::{ActorContext, StageContext};
 use arrow_flight::encode::FlightDataEncoderBuilder;
 use arrow_flight::error::FlightError;
 use arrow_flight::flight_service_server::FlightService;

@@ -1,14 +1,16 @@
 mod channel_manager;
-mod flight_service;
+mod discovery;
+mod exec;
+//mod flight_service;
 mod plan;
-mod stage_delegation;
-mod task;
+mod stage;
+//mod task;
 mod test_utils;
 
 pub use channel_manager::{
     ArrowFlightChannel, BoxCloneSyncChannel, ChannelManager, ChannelResolver,
 };
-pub use flight_service::ArrowFlightEndpoint;
+//pub use flight_service::ArrowFlightEndpoint;
 pub use plan::ArrowFlightReadExec;
-pub use task::{create_task, ExecutionTask};
+pub use stage::{display_stage, display_stage_tree, ExecutionStage, StagePlanner};
 

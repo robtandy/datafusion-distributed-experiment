@@ -8,49 +8,30 @@ use datafusion::{execution::SendableRecordBatchStream, physical_plan::ExecutionP
 use datafusion::error::Result;
 use datafusion_proto::protobuf::PhysicalPlanNode;
 
-/// A task that can be executed by a worker in the distributed execution framework.
-/// It produces a SendableRecordBatchStream when executed.
 #[derive(Debug, Clone)]
-pub enum ExecutionTask {
-    Assigned {
-        /// The address of the worker to which this task is assigned.
-        worker_addr: String,
-        /// The task to be executed.
-        task: Task,
-        /// The inputs to this task, which are other execution tasks that this task depends on.
-        inputs: Vec<Arc<ExecutionTask>>,
-    },
-    Unassigned {
-        /// The task to be executed, which is not yet assigned to any worker.
-        task: Task,
-        /// The inputs to this task, which are other execution tasks that this task depends on.
-        inputs: Vec<Arc<ExecutionTask>>,
-    },
+pub struct ExecutionStage {
+    plan: Arc<dyn ExecutionPlan>,
+    input: Arc<ExecutionStage>,
 }
 
-#[derive(Debug, Clone)]
-pub struct Task {
-    pub(super) plan: Arc<dyn ExecutionPlan>,
-}
-
-impl ExecutionTask {
-    pub fn new(plan: Arc<dyn ExecutionPlan>, inputs: Vec<Arc<ExecutionTask>>) -> Self {
-        ExecutionTask::Unassigned {
+impl ExecutionStage {
+    pub fn new(plan: Arc<dyn ExecutionPlan>, inputs: Vec<Arc<ExecutionStage>>) -> Self {
+        ExecutionStage::Unassigned {
             task: Task { plan },
             inputs,
         }
     }
 
     pub fn is_assigned(&self) -> bool {
-        matches!(self, ExecutionTask::Assigned { .. })
+        matches!(self, ExecutionStage::Assigned { .. })
     }
 
-    pub fn assign(self, worker_addr: String) -> Result<ExecutionTask> {
+    pub fn assign(self, worker_addr: String) -> Result<ExecutionStage> {
         match self {
-            ExecutionTask::Assigned { .. } => {
+            ExecutionStage::Assigned { .. } => {
                 internal_err!("Cannot assign a task that is already assigned")
             }
-            ExecutionTask::Unassigned { task, inputs } => Ok(ExecutionTask::Assigned {
+            ExecutionStage::Unassigned { task, inputs } => Ok(ExecutionStage::Assigned {
                 worker_addr,
                 task,
                 inputs,
@@ -60,8 +41,8 @@ impl ExecutionTask {
 
     pub fn execute(self, task_context: Arc<TaskContext>) -> Result<SendableRecordBatchStream> {
         let plan = match self {
-            ExecutionTask::Assigned { task, .. } => task.plan,
-            ExecutionTask::Unassigned { task, .. } => task.plan,
+            ExecutionStage::Assigned { task, .. } => task.plan,
+            ExecutionStage::Unassigned { task, .. } => task.plan,
         };
         plan.execute(0, task_context)
     }

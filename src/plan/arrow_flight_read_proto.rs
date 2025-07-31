@@ -110,9 +110,7 @@ impl AsExecutionPlan for ArrowFlightReadExecProto {
             Boundedness::Bounded,
         );
 
-        Ok(Arc::new(ArrowFlightReadExec::new_from_properties(
-            properties,
-        )))
+        Ok(Arc::new(ArrowFlightReadExec::new(&properties, "")))
     }
 
     fn try_from_physical_plan(
