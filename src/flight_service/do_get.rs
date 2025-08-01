@@ -17,26 +17,12 @@ use prost::Message;
 use std::sync::Arc;
 use tonic::{Request, Response, Status};
 
+use crate::task::{ExecutionTask, ExecutionTaskMessage};
+
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct DoGet {
-    #[prost(oneof = "DoGetInner", tags = "1")]
-    pub inner: Option<DoGetInner>,
-}
-
-#[derive(Clone, PartialEq, prost::Oneof)]
-pub enum DoGetInner {
-    #[prost(message, tag = "1")]
-    RemotePlanExec(RemotePlanExec),
-}
-
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct RemotePlanExec {
-    #[prost(message, optional, boxed, tag = "1")]
-    plan: Option<Box<PhysicalPlanNode>>,
-    #[prost(message, optional, tag = "2")]
-    stage_context: Option<StageContext>,
-    #[prost(message, optional, tag = "3")]
-    actor_context: Option<ActorContext>,
+    #[prost(message, optional, tag = "1")]
+    pub task: Option<ExecutionTaskMessage>,
 }
 
 impl DoGet {

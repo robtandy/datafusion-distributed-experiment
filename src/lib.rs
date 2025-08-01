@@ -1,10 +1,10 @@
 mod channel_manager;
-mod discovery;
 mod exec;
-//mod flight_service;
+mod flight_service;
 mod plan;
+mod remote;
 mod stage;
-//mod task;
+pub mod task;
 mod test_utils;
 
 pub use channel_manager::{
@@ -13,4 +13,3 @@ pub use channel_manager::{
 //pub use flight_service::ArrowFlightEndpoint;
 pub use plan::ArrowFlightReadExec;
 pub use stage::{display_stage, display_stage_tree, ExecutionStage, StagePlanner};
-
