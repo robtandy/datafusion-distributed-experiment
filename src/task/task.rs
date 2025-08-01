@@ -1,7 +1,9 @@
+use std::collections::{self, HashMap};
 use std::sync::Arc;
 
+use dashmap::DashMap;
 use datafusion::common::tree_node::{Transformed, TreeNode, TreeNodeRecursion};
-use datafusion::common::{internal_datafusion_err, internal_err};
+use datafusion::common::{internal_datafusion_err, internal_err, HashMap};
 use datafusion::execution::TaskContext;
 use datafusion::physical_plan::{DisplayAs, DisplayFormatType};
 use datafusion::{execution::SendableRecordBatchStream, physical_plan::ExecutionPlan};
@@ -80,6 +82,8 @@ pub struct ExecutionTask {
     /// The input tasks that this task depends on.  These tasks will be executed on remote wrokers
     /// Note that they are stored as dyn ExecutionPlan, but will always be ExecutionTask
     pub inputs: Vec<Arc<dyn ExecutionPlan>>,
+    /// Stored as a map of partition -> ExecutionTask
+    pub task_map: HashMap<usize, Arc<dyn ExecutionPlan>>,
     /// The physical execution codec used to serialize subtasks
     pub codec: Arc<dyn PhysicalExtensionCodec>,
 }
@@ -113,9 +117,8 @@ pub struct ExecutionTaskMessage {
     pub partition_group: Vec<u32>,
     /// The input tasks, proto encoded, that this task depends on. Boxed to avoid infinite recursion
     /// per prost docs
-    #[prost(message, repeated, tag = "5")]
-    #[allow(clippy::vec_box)]
-    pub inputs: Vec<Box<ExecutionTaskMessage>>,
+    #[prost(map = "uint32, message", tag = "5")]
+    pub inputs: HashMap<u32, ExecutionTaskMessage>,
 }
 
 impl ExecutionTask {
@@ -125,7 +128,7 @@ impl ExecutionTask {
         name: &str,
         plan: Arc<dyn ExecutionPlan>,
         partition_group: &[usize],
-        inputs: Vec<Arc<dyn ExecutionPlan>>,
+        inputs: HashMap<usize, Arc<dyn ExecutionPlan>>,
         codec: Option<Arc<dyn PhysicalExtensionCodec>>,
     ) -> Self {
         ExecutionTask {
@@ -166,17 +169,20 @@ impl ExecutionTask {
             ))?;
 
         // Recursively assign inputs
-        let assigned_inputs = self
-            .inputs
-            .iter()
-            .map(|input| {
-                input
+        let assigned_inputs = self.inputs.clone();
+
+        assigned_inputs
+            .iter_mut()
+            .map(|mut entry| {
+                let v = entry.value_mut();
+                *v = v
                     .as_any()
                     .downcast_ref::<ExecutionTask>()
                     .ok_or_else(|| internal_datafusion_err!("Input is not an ExecutionTask"))
                     .and_then(|task| task.assign(worker_addrs, worker_assignment))
                     .map(Arc::new)
-                    .map(|a| a as Arc<dyn ExecutionPlan>)
+                    .map(|a| a as Arc<dyn ExecutionPlan>)?;
+                Ok(())
             })
             .collect::<Result<Vec<_>>>()?;
 
@@ -219,7 +225,7 @@ impl ExecutionPlan for ExecutionTask {
     }
 
     fn children(&self) -> Vec<&Arc<dyn ExecutionPlan>> {
-        self.inputs.iter().collect()
+        self.inputs.iter().clone()
     }
 
     fn with_new_children(
